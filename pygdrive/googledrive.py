@@ -100,7 +100,7 @@ class GoogleDrive(object):
         logger.debug(f"children of {parent.id}: {result}")
         return sorted(result, key=lambda x: x.name)
 
-    def download(service: Resource, file: GoogleDriveFile, output):
+    def download(self, file: GoogleDriveFile, output):
         if type(output) is str:
             output_handler = open(output, 'wb')
         else:
