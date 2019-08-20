@@ -1,13 +1,15 @@
 from __future__ import print_function
 import pickle
 import os
+import magic
 from googleapiclient.discovery import build
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
-from googleapiclient.http import MediaIoBaseDownload
+from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
 from googleapiclient.discovery import Resource
 from enum import Enum
 from collections import ChainMap
+from datetime import datetime
 from typing import List, Dict, NamedTuple, Tuple
 
 import logging
@@ -15,6 +17,12 @@ import logging
 DEFAULT_SCOPES = [
     'https://www.googleapis.com/auth/drive'
 ]
+
+def format_datetime(d: datetime) -> str:
+    return d.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+
+def file_mtime(file_path: str) -> datetime:
+    return datetime.fromtimestamp(os.path.getmtime(file_path))
 
 class GoogleAuth(object):
     __pickle_cache = ".token.pickle"
@@ -86,6 +94,7 @@ class GoogleDrive(object):
     def __init__(self, auth: GoogleAuth):
         self.logger = logging.getLogger("%s.%s" % (__name__, "GoogleDrive"))
         self.service = auth.service
+        self.mime = magic.Magic(mime=True)
 
     def __common_list(self, **kwargs) -> List[GoogleDriveFile]:
         args = dict(ChainMap({
@@ -95,13 +104,14 @@ class GoogleDrive(object):
         files = result.get('files', [])
         return GoogleDriveFile.construct(files)
 
-    def find(self, name: str, mimeType: MimeType=None, parent: GoogleDriveFile=None) -> GoogleDriveFile:
+    def find(self, name: str, id: str=None, mimeType: MimeType=None, parent: GoogleDriveFile=None) -> GoogleDriveFile:
         """Find a single file in Google Drive
         
         Arguments:
             name {str} -- File exact name
         
         Keyword Arguments:
+            id {str} -- ID of file (default: {None})
             mimeType {MimeType} -- Mime Type of file (default: {None})
             parent {GoogleDriveFile} -- Parent Folder (default: {None})
         
@@ -109,6 +119,8 @@ class GoogleDrive(object):
             GoogleDriveFile -- the GoogleDriveFile object, None if not found
         """
         query = [f"name='{name}'"]
+        if id:
+            query.append("id='%s'" % id)
         if mimeType:
             query.append("mimeType='%s'" % mimeType.value)
         if parent:
@@ -120,19 +132,20 @@ class GoogleDrive(object):
         self.logger.debug(f"folder {name}': {result[0]}")
         return result[0]
 
-    def find_folder(self, name: str, parent: GoogleDriveFile=None) -> GoogleDriveFile:
+    def find_folder(self, name: str, id: str=None, parent: GoogleDriveFile=None) -> GoogleDriveFile:
         """Find a folder in Google Drive
         
         Arguments:
             name {str} -- Folder exact name
         
         Keyword Arguments:
+            id {str} -- ID of file (default: {None})
             parent {GoogleDriveFile} -- Parent Folder (default: {None})
         
         Returns:
             GoogleDriveFile -- the GoogleDriveFile object, None if not found
         """
-        return self.find(name, MimeType.FOLDER, parent)
+        return self.find(name, id, MimeType.FOLDER, parent)
 
     def list(self, parent: GoogleDriveFile) -> List[GoogleDriveFile]:
         """List files under a folder
@@ -201,3 +214,32 @@ class GoogleDrive(object):
                 errors[file.id] = str(ex)
 
         return (not errors, errors)
+
+    def upload(self, file_path:str, parent: GoogleDriveFile=None) -> Tuple[bool, str]:
+        """Upload a file to Google Drive
+        
+        Arguments:
+            file_path {str} -- filepath of the file to be uploaded
+        
+        Keyword Arguments:
+            parent {GoogleDriveFile} -- target folder, root folder if nothing (default: {None})
+        
+        Returns:
+            Tuple[bool, str] -- [description]
+        """
+        try:
+            if not os.path.isfile(file_path):
+                raise ValueError(f"filepath {file_path} not exists")
+            file_name = os.path.basename(file_path)
+            file_metadata = {'name': file_name,
+                             'modifiedTime': format_datetime(file_mtime(file_path)) }
+            if parent:
+                file_metadata["parents"] = [parent.id]
+            media = MediaFileUpload(file_path,
+                                    mimetype=self.mime.from_file(file_path))
+            file = self.service.files().create(body=file_metadata,
+                                                media_body=media,
+                                                fields='id').execute()
+            return (True, None)
+        except Exception as ex:
+            return (False, str(ex))
