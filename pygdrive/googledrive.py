@@ -11,7 +11,6 @@ from collections import ChainMap
 from typing import List, Dict, NamedTuple
 
 import logging
-logger = logging.getLogger(__name__)
 
 DEFAULT_SCOPES = [
     'https://www.googleapis.com/auth/drive'
@@ -22,6 +21,7 @@ class GoogleAuth(object):
     service = None
 
     def __init__(self, credential_file: str='client_secret.json', scopes: List[str]=DEFAULT_SCOPES, save: bool=True):
+        self.logger = logging.getLogger("%s.%s" % (__name__, "GoogleDrive"))
         creds = None
         # The file token.pickle stores the user's access and refresh tokens, and is
         # created automatically when the authorization flow completes for the first
@@ -41,7 +41,7 @@ class GoogleAuth(object):
                 with open(self.__pickle_cache, 'wb') as token:
                     pickle.dump(creds, token)
 
-        logger.info("logging in Google: /drive/api/v3")
+        self.logger.info("logging in Google: /drive/api/v3")
         service = build('drive', 'v3', credentials=creds)
         self.service = service
 
@@ -68,6 +68,7 @@ class GoogleDrive(object):
     LIST_LIMIT = 1000
 
     def __init__(self, auth: GoogleAuth):
+        self.logger = logging.getLogger("%s.%s" % (__name__, "GoogleDrive"))
         self.service = auth.service
 
     def __common_list(self, **kwargs) -> List[GoogleDriveFile]:
@@ -79,38 +80,75 @@ class GoogleDrive(object):
         return GoogleDriveFile.construct(files)
 
     def find(self, name: str, mimeType: MimeType=None, parent: GoogleDriveFile=None) -> GoogleDriveFile:
+        """Find a single file in Google Drive
+        
+        Arguments:
+            name {str} -- File exact name
+        
+        Keyword Arguments:
+            mimeType {MimeType} -- Mime Type of file (default: {None})
+            parent {GoogleDriveFile} -- Parent Folder (default: {None})
+        
+        Returns:
+            GoogleDriveFile -- the GoogleDriveFile object, None if not found
+        """
         query = [f"name='{name}'"]
         if mimeType:
             query.append("mimeType='%s'" % mimeType.value)
         if parent:
             query.append("'%s' in parent s" % parent.id)
         result = self.__common_list(q=" and ".join(query), pageSize=1)
-        logger.debug(f"result {result}")
+        self.logger.debug(f"result {result}")
         if len(result) < 1:
             return None
-        logger.debug(f"folder {name}': {result[0]}")
+        self.logger.debug(f"folder {name}': {result[0]}")
         return result[0]
 
     def find_folder(self, name: str, parent: GoogleDriveFile=None) -> GoogleDriveFile:
+        """Find a folder in Google Drive
+        
+        Arguments:
+            name {str} -- Folder exact name
+        
+        Keyword Arguments:
+            parent {GoogleDriveFile} -- Parent Folder (default: {None})
+        
+        Returns:
+            GoogleDriveFile -- the GoogleDriveFile object, None if not found
+        """
         return self.find(name, MimeType.FOLDER, parent)
 
     def list(self, parent: GoogleDriveFile) -> List[GoogleDriveFile]:
+        """List files under a folder
+        
+        Arguments:
+            parent {GoogleDriveFile} -- Parent Folder
+        
+        Returns:
+            List[GoogleDriveFile] -- a list of GoogleDriveFile objects
+        """
         query = [f"'{parent.id}' in parents"]
         result = self.__common_list( q=" and ".join(query), pageSize=self.LIST_LIMIT)
-        logger.debug(f"children of {parent.id}: {result}")
+        self.logger.debug(f"children of {parent.id}: {result}")
         return sorted(result, key=lambda x: x.name)
 
     def download(self, file: GoogleDriveFile, output):
+        """Download single file
+        
+        Arguments:
+            file {GoogleDriveFile} -- Target file in GoogleDrive to be downloaded
+            output {[str|callable]} -- Output handler, str for local file, otherwise fileHandler 
+        """
         if type(output) is str:
             output_handler = open(output, 'wb')
         else:
             output_handler = output
 
-        logger.info(f"download file[id={file.id}]: {file.name}")
+        self.logger.info(f"download file[id={file.id}]: {file.name}")
         request = self.service.files().get_media(fileId=file.id)
         downloader = MediaIoBaseDownload(output_handler, request)
         done = False
         while done is False:
             status, done = downloader.next_chunk()
-            logger.info("\rdownloading %d%%.\r" % int(status.progress() * 100))
+            self.logger.info("\rdownloading %d%%.\r" % int(status.progress() * 100))
             output_handler.seek(0)
