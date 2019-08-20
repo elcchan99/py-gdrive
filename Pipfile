@@ -4,6 +4,7 @@ url = "https://pypi.org/simple"
 verify_ssl = true
 
 [dev-packages]
+pylint = "*"
 
 [packages]
 google-api-python-client = "*"
@@ -11,4 +12,4 @@ pydrive = "*"
 google-auth-oauthlib = "*"
 
 [requires]
-python_version = "3.7"
+python_version = "3.6"
