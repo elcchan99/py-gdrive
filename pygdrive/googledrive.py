@@ -1,6 +1,6 @@
 from __future__ import print_function
 import pickle
-import os.path
+import os
 from googleapiclient.discovery import build
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
@@ -8,7 +8,7 @@ from googleapiclient.http import MediaIoBaseDownload
 from googleapiclient.discovery import Resource
 from enum import Enum
 from collections import ChainMap
-from typing import List, Dict, NamedTuple
+from typing import List, Dict, NamedTuple, Tuple
 
 import logging
 
@@ -60,6 +60,22 @@ class GoogleDriveFile(NamedTuple):
             return cls(**data)
         else:
             raise ValueError("data must be either list of dictionary or dictionary")
+
+    def isfile(self) -> bool:
+        """Whether node is a File
+        
+        Returns:
+            bool -- Result
+        """
+        return not self.isdir()
+
+    def isdir(self) -> bool:
+        """Whether node is a Folder
+        
+        Returns:
+            bool -- Result
+        """
+        return self.mimeType == MimeType.FOLDER.value
 
 class MimeType(Enum):
     FOLDER = 'application/vnd.google-apps.folder'
@@ -132,23 +148,56 @@ class GoogleDrive(object):
         self.logger.debug(f"children of {parent.id}: {result}")
         return sorted(result, key=lambda x: x.name)
 
-    def download(self, file: GoogleDriveFile, output):
+    def download(self, file: GoogleDriveFile, output) -> Tuple[bool, str]:
         """Download single file
         
         Arguments:
             file {GoogleDriveFile} -- Target file in GoogleDrive to be downloaded
             output {[str|callable]} -- Output handler, str for local file, otherwise fileHandler 
+
+        Returns:
+            Tuple[bool, str] -- Result, Error report
         """
         if type(output) is str:
             output_handler = open(output, 'wb')
         else:
             output_handler = output
 
-        self.logger.info(f"download file[id={file.id}]: {file.name}")
-        request = self.service.files().get_media(fileId=file.id)
-        downloader = MediaIoBaseDownload(output_handler, request)
-        done = False
-        while done is False:
-            status, done = downloader.next_chunk()
-            self.logger.info("\rdownloading %d%%.\r" % int(status.progress() * 100))
-            output_handler.seek(0)
+        try:
+            self.logger.info(f"download file[id={file.id}]: {file.name}")
+            request = self.service.files().get_media(fileId=file.id)
+            downloader = MediaIoBaseDownload(output_handler, request)
+            done = False
+            while done is False:
+                status, done = downloader.next_chunk()
+                self.logger.info("\rdownloading %d%%.\r" % int(status.progress() * 100))
+                output_handler.seek(0)
+            return (True, None)
+        except Exception as ex:
+            return (False, str(ex))
+            
+    def download_folder(self, folder: GoogleDriveFile, output_path: str) -> Tuple[bool, Dict[str, str]]:
+        """Download folder and its files
+        
+        Arguments:
+            folder {GoogleDriveFile} -- Target folder in GoogleDrive to be downloaded
+            output_path {str} -- local path
+        
+        Returns:
+            Tuple[bool, Dict[str, str]] -- Result, Error report
+        """
+        errors = {}
+        os.makedirs(output_path, exist_ok=True)
+        for file in self.list(folder):
+            p = os.path.join(output_path, file.name)
+            try:
+                if file.isdir():
+                    r, err = self.download_folder(file, p)
+                else:
+                    r, err = self.download(file, p)
+                if not r:
+                    errors[file.id] = err
+            except Exception as ex:
+                errors[file.id] = str(ex)
+
+        return (not errors, errors)
