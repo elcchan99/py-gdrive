@@ -2,7 +2,7 @@
 
 ## Installation
 ```
-pipenv install
+pip install git+https://github.com/elcchan99/py-gdrive.git@master#egg=pygdrive
 ```
 
 ## Authentication
