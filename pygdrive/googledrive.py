@@ -1,6 +1,7 @@
 from __future__ import print_function
 import pickle
 import os
+from glob import glob
 import magic
 from googleapiclient.discovery import build
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -17,6 +18,8 @@ import logging
 DEFAULT_SCOPES = [
     'https://www.googleapis.com/auth/drive'
 ]
+
+COMMON_FILE_FIELDS = 'id, name, mimeType, modifiedTime, capabilities'
 
 def format_datetime(d: datetime) -> str:
     return d.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
@@ -98,7 +101,7 @@ class GoogleDrive(object):
 
     def __common_list(self, **kwargs) -> List[GoogleDriveFile]:
         args = dict(ChainMap({
-            'fields': "files(id, name, mimeType, modifiedTime, capabilities)"
+            'fields': f"files({COMMON_FILE_FIELDS})"
         }, kwargs))
         result = self.service.files().list(**args).execute()
         files = result.get('files', [])
@@ -215,7 +218,7 @@ class GoogleDrive(object):
 
         return (not errors, errors)
 
-    def upload(self, file_path:str, parent: GoogleDriveFile=None) -> Tuple[bool, str]:
+    def upload(self, file_path:str, parent: GoogleDriveFile=None) -> Tuple[GoogleDriveFile, str]:
         """Upload a file to Google Drive
         
         Arguments:
@@ -235,11 +238,48 @@ class GoogleDrive(object):
                              'modifiedTime': format_datetime(file_mtime(file_path)) }
             if parent:
                 file_metadata["parents"] = [parent.id]
+            self.logger.info("uploading %s" % file_path)
             media = MediaFileUpload(file_path,
                                     mimetype=self.mime.from_file(file_path))
             file = self.service.files().create(body=file_metadata,
                                                 media_body=media,
-                                                fields='id').execute()
-            return (True, None)
+                                                fields=COMMON_FILE_FIELDS).execute()
+            return (GoogleDriveFile.construct(file), None)
         except Exception as ex:
-            return (False, str(ex))
+            print(ex)
+            return (None, str(ex))
+
+    def upload_folder(self, dir_path:str, parent: GoogleDriveFile=None) -> Tuple[List[GoogleDriveFile], str]:
+        """Upload folder to Google Drive
+        
+        Arguments:
+            dir_path {str} -- filepath of the folder to be uploaded
+        
+        Keyword Arguments:
+            parent {GoogleDriveFile} -- target folder, root folder if nothing (default: {None})
+        
+        Returns:
+            Tuple[bool, str] -- [description]
+        """
+        try:
+            if not os.path.isdir(dir_path):
+                raise ValueError(f"dir_path {dir_path} not exists")
+            file_name = os.path.basename(dir_path)
+            file_metadata = {'name': file_name,
+                             'mimeType': MimeType.FOLDER.value,
+                             'modifiedTime': format_datetime(file_mtime(dir_path)) }
+            if parent:
+                file_metadata["parents"] = [parent.id]
+            file = self.service.files().create(body=file_metadata,
+                                                fields=COMMON_FILE_FIELDS).execute()
+
+            gddir = GoogleDriveFile.construct(file)
+            res = [gddir]
+            for f in glob(os.path.join(dir_path, "*")):
+                gdfile, _ = self.upload(f, gddir)
+                res += gdfile
+
+
+            return (res, None)
+        except Exception as ex:
+            return (res, str(ex))
