@@ -276,7 +276,10 @@ class GoogleDrive(object):
             gddir = GoogleDriveFile.construct(file)
             res = [gddir]
             for f in glob(os.path.join(dir_path, "*")):
-                gdfile, _ = self.upload(f, gddir)
+                if os.path.isdir(f):
+                    gdfile, _ = self.upload_folderf, gddir
+                else:
+                    gdfile, _ = self.upload(f, gddir)
                 res += gdfile
 
 
