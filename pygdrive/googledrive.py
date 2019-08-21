@@ -190,6 +190,7 @@ class GoogleDrive(object):
                 output_handler.seek(0)
             return (True, None)
         except Exception as ex:
+            self.logger.error(ex)
             return (False, str(ex))
             
     def download_folder(self, folder: GoogleDriveFile, output_path: str) -> Tuple[bool, Dict[str, str]]:
@@ -214,75 +215,57 @@ class GoogleDrive(object):
                 if not r:
                     errors[file.id] = err
             except Exception as ex:
+                self.logger.error(ex)
                 errors[file.id] = str(ex)
 
         return (not errors, errors)
 
-    def upload(self, file_path:str, parent: GoogleDriveFile=None) -> Tuple[GoogleDriveFile, str]:
-        """Upload a file to Google Drive
+    def upload(self, file_path:str, parent: GoogleDriveFile=None, recusive: bool=False, depth: List[str]=[]) -> Tuple[GoogleDriveFile, str]:
+        """Upload a file or folder to Google Drive
         
         Arguments:
             file_path {str} -- filepath of the file to be uploaded
         
         Keyword Arguments:
             parent {GoogleDriveFile} -- target folder, root folder if nothing (default: {None})
+            recusive {bool} -- whether upload recusively (default: {False})
+            depth {List[str]} -- depth path for logging (default: {[]})
         
         Returns:
-            Tuple[bool, str] -- [description]
+            Tuple[List[str], str] -- List of uploaded GoogleDriveFile, error
         """
         try:
-            if not os.path.isfile(file_path):
+            if not os.path.exists(file_path):
                 raise ValueError(f"filepath {file_path} not exists")
+
+            isdir = os.path.isdir(file_path)
             file_name = os.path.basename(file_path)
             file_metadata = {'name': file_name,
                              'modifiedTime': format_datetime(file_mtime(file_path)) }
             if parent:
                 file_metadata["parents"] = [parent.id]
-            self.logger.info("uploading %s" % file_path)
-            media = MediaFileUpload(file_path,
-                                    mimetype=self.mime.from_file(file_path))
+            if isdir:
+                file_metadata["mimeType"] = MimeType.FOLDER.value
+            
+            new_depth = depth + [file_name]
+            google_path = os.path.join(*new_depth)
+            if isdir:
+                self.logger.info("creating folder %s" % (google_path))
+                media_body = None
+            else:
+                self.logger.info("uploading %s to %s" % (file_path, google_path))
+                media_body = MediaFileUpload(file_path,
+                                        mimetype=self.mime.from_file(file_path))
             file = self.service.files().create(body=file_metadata,
-                                                media_body=media,
+                                                media_body=media_body,
                                                 fields=COMMON_FILE_FIELDS).execute()
-            return (GoogleDriveFile.construct(file), None)
-        except Exception as ex:
-            print(ex)
-            return (None, str(ex))
-
-    def upload_folder(self, dir_path:str, parent: GoogleDriveFile=None) -> Tuple[List[GoogleDriveFile], str]:
-        """Upload folder to Google Drive
-        
-        Arguments:
-            dir_path {str} -- filepath of the folder to be uploaded
-        
-        Keyword Arguments:
-            parent {GoogleDriveFile} -- target folder, root folder if nothing (default: {None})
-        
-        Returns:
-            Tuple[bool, str] -- [description]
-        """
-        try:
-            if not os.path.isdir(dir_path):
-                raise ValueError(f"dir_path {dir_path} not exists")
-            file_name = os.path.basename(dir_path)
-            file_metadata = {'name': file_name,
-                             'mimeType': MimeType.FOLDER.value,
-                             'modifiedTime': format_datetime(file_mtime(dir_path)) }
-            if parent:
-                file_metadata["parents"] = [parent.id]
-            file = self.service.files().create(body=file_metadata,
-                                                fields=COMMON_FILE_FIELDS).execute()
-
-            gddir = GoogleDriveFile.construct(file)
-            res = [gddir]
-            for f in glob(os.path.join(dir_path, "*")):
-                if os.path.isdir(f):
-                    gdfile, _ = self.upload_folderf, gddir
-                else:
-                    gdfile, _ = self.upload(f, gddir)
-                res += gdfile
-
-
+            gfile = GoogleDriveFile.construct(file)
+            res = [gfile]
+            if recusive and isdir:
+                for f in glob(os.path.join(file_path, "*")):
+                    gfile_list, _ = self.upload(f, parent=gfile, recusive=recusive, depth=new_depth)
+                    res = res + gfile_list
             return (res, None)
         except Exception as ex:
-            return (res, str(ex))
+            self.logger.error(ex)
+            return (None, str(ex))
