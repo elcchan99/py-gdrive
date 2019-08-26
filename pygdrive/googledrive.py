@@ -90,6 +90,7 @@ class GoogleDriveFile(NamedTuple):
 
 class MimeType(Enum):
     FOLDER = 'application/vnd.google-apps.folder'
+    SPREADSHEET = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 
 class GoogleDrive(object):
     LIST_LIMIT = 1000
@@ -127,7 +128,7 @@ class GoogleDrive(object):
         if mimeType:
             query.append("mimeType='%s'" % mimeType.value)
         if parent:
-            query.append("'%s' in parent s" % parent.id)
+            query.append(f"'{parent.id}' in parents")
         result = self.__common_list(q=" and ".join(query), pageSize=1)
         self.logger.debug(f"result {result}")
         if len(result) < 1:
@@ -220,7 +221,7 @@ class GoogleDrive(object):
 
         return (not errors, errors)
 
-    def upload(self, file_path:str, parent: GoogleDriveFile=None, recusive: bool=False, depth: List[str]=[]) -> Tuple[GoogleDriveFile, str]:
+    def upload(self, file_path:str, parent: GoogleDriveFile=None, recusive: bool=False, customMeta: Dict={}, depth: List[str]=[]) -> Tuple[GoogleDriveFile, str]:
         """Upload a file or folder to Google Drive
         
         Arguments:
@@ -229,6 +230,7 @@ class GoogleDrive(object):
         Keyword Arguments:
             parent {GoogleDriveFile} -- target folder, root folder if nothing (default: {None})
             recusive {bool} -- whether upload recusively (default: {False})
+            customMeta {Dict} -- custom metadata overrides (default: {{}})
             depth {List[str]} -- depth path for logging (default: {[]})
         
         Returns:
@@ -246,6 +248,7 @@ class GoogleDrive(object):
                 file_metadata["parents"] = [parent.id]
             if isdir:
                 file_metadata["mimeType"] = MimeType.FOLDER.value
+            file_metadata.update(customMeta)
             
             new_depth = depth + [file_name]
             google_path = os.path.join(*new_depth)
