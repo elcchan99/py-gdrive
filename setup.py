@@ -21,7 +21,7 @@ have pip >= 9.0 and setuptools >= 24.2, then try again:
     sys.exit(1)
 
 setup(name="pygdrive", 
-      version='0.2.2',
+      version='0.2.3',
       packages=find_packages(),
       python_requires='>={}.{}'.format(*REQUIRED_PYTHON),
       install_requires=[
