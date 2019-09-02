@@ -221,6 +221,34 @@ class GoogleDrive(object):
 
         return (not errors, errors)
 
+    def mkdir(self, name: str, parent: GoogleDriveFile=None) -> Tuple[GoogleDriveFile, str]:
+        """Make directory
+        
+        Arguments:
+            name {List[str]} -- folder name
+        
+        Keyword Arguments:
+            parent {GoogleDriveFile} -- target folder, root folder if nothing (default: {None})
+            depth {List[str]} -- depth path for logging (default: {[]})
+        Returns:
+            Tuple[GoogleDriveFile, str] -- GoogleDriveFile, error
+        """
+        try:
+            file_metadata = {'name': name,
+                             'mimeType' : MimeType.FOLDER.value}
+            google_path = "name"
+            if parent:
+                file_metadata['parents'] = [parent.id]
+                google_path = os.path.join(parent.name, name)
+            self.logger.info("creating folder %s" % (google_path))
+            file = self.service.files().create(body=file_metadata,
+                                               media_body=None,
+                                               fields=COMMON_FILE_FIELDS).execute()
+            return (GoogleDriveFile.construct(file), None)
+        except Exception as ex:
+            self.logger.error(ex)
+            return (None, str(ex))
+
     def upload(self, file_path:str, parent: GoogleDriveFile=None, recusive: bool=False, customMeta: Dict={}, depth: List[str]=[]) -> Tuple[GoogleDriveFile, str]:
         """Upload a file or folder to Google Drive
         
